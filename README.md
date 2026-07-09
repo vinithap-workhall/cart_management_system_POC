@@ -9,10 +9,10 @@
 Create a `.env` file
 
 ```env
-PORT=
-MONGODB_URI=
-DB_NAME=
-JWT_SECRET=
+PORT=5000
+MONGODB_URI=mongodb://localhost:27017
+DB_NAME=cart_management_system
+JWT_SECRET=your_jwt_secret_here
 ```
 
 ## Customer Management APIs
