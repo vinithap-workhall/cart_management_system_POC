@@ -19,12 +19,11 @@ async function findProductById(productId) {
   return db.collection(COLLECTION).findOne({productId});
 }
 
-async function listProducts(page,limit) {
+async function listProducts(filter, sort, { skip, limit }) {
   const db = getDB();
-  const skip = (page - 1) * limit;
-  return db.collection(COLLECTION)
-    .find()
-    .sort({createdAt:-1})
+  return db.collection('products')
+    .find(filter)
+    .sort(sort)
     .skip(skip)
     .limit(limit)
     .toArray();

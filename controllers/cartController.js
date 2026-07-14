@@ -3,6 +3,16 @@ import * as  productModel from '../models/productModel.js';
 import * as  customerModel from'../models/customerModel.js';
 import  {logProductActivity} from '../models/productActivityLogModel.js';
 import {getDB } from "../config/db.js";
+import { buildFilter, buildSort, buildPagination } from '../utils/built.js';
+const CART_FILTER_SCHEMA = {
+  status: { field: 'status', type: 'exact' },       
+  minTotal: { field: 'total', type: 'gte' },         
+  maxTotal: { field: 'total', type: 'lte' },         
+  couponCode: { field: 'couponCode', type: 'exact' },
+};
+const CART_SORTABLE_FIELDS = ['createdAt','updatedAt','total','status'];
+
+
 function canAccessCart(cart, user) {
   return cart.customerId === user.customerId && user.role !== 'admin';
 }
@@ -59,17 +69,20 @@ export const  getCustomerCarts = async (req,res,next) => {
       return res.status(403).json({ success: false, message: 'You do not have access to this resource' });
     }
 
-  const page = Number(req.query.page) > 0 ? Number(req.query.page) : 1;
-  const limit = Number(req.query.limit) > 0 ? Number(req.query.limit) : 10;
+  const filter = buildFilter(req.query,CART_FILTER_SCHEMA);
+    filter.customerId = req.params.customerId; 
+    const sort = buildSort(req.query, CART_SORTABLE_FIELDS);
+    const { page, limit, skip } = buildPagination(req.query);
 
-    const carts = await cartModel.findCartsByCustomerId(req.params.customerId,page,limit);
+    const carts = await cartModel.findCartsByCustomerId(filter, sort, { skip, limit });
     for (const cart of carts) {
       await cartModel.refreshPrice(cart);
     }
     return res.status(200).json({
       success: true,
       message: 'Carts fetched successfully',
-      data: carts
+      data: carts,
+      pagination: {page, limit}
     });
   } catch (err) {
       next(err);
@@ -123,7 +136,7 @@ export const addItem = async (req,res,next) => {
       statusCode = 201;
     }
     await cartModel.recalcAndSave(cart);
-    await logProductActivity(productId, 'ADD', quantity);
+    await logProductActivity(cart.customerId,productId, 'ADD', quantity);
     return res.status(statusCode).json({
       success: true,
       message: statusCode === 201 ? 'Item added to cart' : 'Item quantity updated',
@@ -169,10 +182,10 @@ export const updateItemQuantity = async (req,res,next) => {
       });
     }
     if(item.quantity > quantity){
-      await logProductActivity(item.productId,'REMOVE',item.quantity - quantity);
+      await logProductActivity(cart.customerId,item.productId,'REMOVE',item.quantity - quantity);
     }
     if(quantity > item.quantity){
-      await logProductActivity(item.productId,'ADD', quantity - item.quantity);
+      await logProductActivity(cart.customerId,item.productId,'ADD', quantity - item.quantity);
     }
     item.quantity = quantity;
     item.unitPrice= product.price;
@@ -227,8 +240,7 @@ export const removeItem = async (req, res, next) => {
       updatedCart.discountPercentage = 0;
     }
     await cartModel.recalcAndSave(updatedCart);
-    await logProductActivity(item.productId,"REMOVE",item.quantity
-    );
+    await logProductActivity(cart.customerId,item.productId,"REMOVE",item.quantity);
 
     return res.status(200).json({
       success: true,

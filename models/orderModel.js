@@ -25,13 +25,13 @@ async function findOrderById(orderId) {
   return db.collection(COLLECTION).findOne({ _id: new ObjectId(orderId)});
 }
 
-async function findOrdersByCustomerId(customerId, page , limit) {
+async function findOrdersByCustomerId(filter, sort,skip, limit) {
   const db = getDB();
-  const skip = (page - 1) * limit;
-
-  return db.collection(COLLECTION)
-    .find({customerId:new ObjectId(customerId)}).sort({ createdAt: -1 })
-    .skip(skip).limit(limit)
+ return db.collection('carts')
+    .find(filter)
+    .sort(sort)
+    .skip(skip)
+    .limit(limit)
     .toArray();
 }
 

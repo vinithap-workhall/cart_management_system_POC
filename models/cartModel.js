@@ -106,11 +106,11 @@ async function findCartById(cartId) {
   return db.collection(COLLECTION).findOne({_id: new ObjectId(cartId)});
 }
 
-async function findCartsByCustomerId(customerId, page, limit) {
+async function findCartsByCustomerId(filter, sort, { skip, limit }) {
   const db = getDB();
-  const skip = (page - 1) * limit;
-  return db.collection(COLLECTION).find({customerId})
-    .sort({ createdAt: -1 })
+  return db.collection('carts')
+    .find(filter)
+    .sort(sort)
     .skip(skip)
     .limit(limit)
     .toArray();

@@ -1,5 +1,15 @@
 import  bcrypt from 'bcryptjs';
 import * as customerModel from'../models/customerModel.js';
+import { buildFilter, buildSort, buildPagination } from '../utils/built.js';
+const CUSTOMER_FILTER_SCHEMA = {
+  name:{ field: 'name', type: 'regex' },
+  email:{ field: 'email', type: 'regex' },
+  role:{ field: 'role', type: 'exact' },
+  startDate:{ field: 'createdAt', type: 'dateGte' },
+  endDate:{field: 'createdAt', type: 'dateLte' },
+};
+const CUSTOMER_SORTABLE_FIELDS = ['createdAt', 'name', 'email'];
+
 export const createCustomer = async (req,res,next) => {
   try {
     const existingEmail = await customerModel.findCustomerByEmail(req.body.email.toLowerCase());
@@ -44,13 +54,15 @@ export const getCustomer = async (req,res,next) => {
 
 export const listCustomers = async (req,res,next) => {
   try {
-      const page = Number(req.query.page) > 0 ? Number(req.query.page) : 1;
-    const limit = Number(req.query.limit) > 0 ? Number(req.query.limit) : 10;
-    const customers = await customerModel.listCustomers(page,limit);
+    const filter = buildFilter(req.query, CUSTOMER_FILTER_SCHEMA);
+    const sort = buildSort(req.query, CUSTOMER_SORTABLE_FIELDS);
+    const { page, limit, skip } = buildPagination(req.query);
+    const customers = await customerModel.listCustomers(filter, sort, {skip, limit });
     return res.status(200).json({
       success: true,
       message: 'Customers fetched successfully',
-      data: customers
+      data: customers,
+      pagination: { page, limit }
     });
   } catch (err) {
     next(err);

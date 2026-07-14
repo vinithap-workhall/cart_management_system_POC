@@ -3,6 +3,16 @@ import * as orderModel from '../models/orderModel.js';
 import * as productModel from '../models/productModel.js';
 import * as customerModel from '../models/customerModel.js';
 import  {logCheckoutAttempt} from '../models/checkoutLogModel.js';
+import { buildFilter, buildSort, buildPagination } from '../utils/built.js';
+
+const ORDER_FILTER_SCHEMA = {
+  minTotal: { field: 'totalAmount', type: 'gte' },
+  maxTotal: { field: 'totalAmount', type: 'lte' },
+  couponCode: { field: 'couponCode', type: 'exact' },
+  startDate: { field: 'createdAt', type: 'dateGte' },
+  endDate: { field: 'createdAt', type: 'dateLte' },
+};
+const ORDER_SORTABLE_FIELDS = ['createdAt', 'total'];
 
 export const checkout = async (req,res,next) => {
   const {cartId} = req.params;
@@ -81,11 +91,11 @@ export const checkout = async (req,res,next) => {
 export const getOrder = async (req,res,next) => {
   try {
     const order = await orderModel.findOrderById(req.params.orderId);
-   if ( req.user.role !== "admin" && order.customerId.toString() !== req.user.customerId){
-      return res.status(403).json({ success: false, message: 'You do not have access to this order' });
-    }
     if (!order) {
       return res.status(404).json({ success: false, message: 'Order not found' });
+    }
+   if ( req.user.role !== "admin" && order.customerId.toString() !== req.user.customerId){
+      return res.status(403).json({ success: false, message: 'You do not have access to this order' });
     }
     return res.status(200).json({
       success: true,
@@ -106,13 +116,17 @@ export const getCustomerOrders = async (req,res,next) => {
     if (!customer) {
       return res.status(404).json({ success: false, message: 'Customer not found' });
     }
-    const page = Number(req.query.page) > 0 ? Number(req.query.page) : 1;
-    const limit = Number(req.query.limit) > 0 ? Number(req.query.limit) : 10;
-    const orders = await orderModel.findOrdersByCustomerId(req.params.customerId,page,limit);
+    const filter = buildFilter(req.query, ORDER_FILTER_SCHEMA);
+    filter.customerId = req.params.customerId;
+    const sort = buildSort(req.query, ORDER_SORTABLE_FIELDS);
+    const { page, limit, skip } = buildPagination(req.query);
+
+    const orders = await orderModel.findOrdersByCustomerId(filter, sort,skip,limit);
     return res.status(200).json({
       success: true,
       message: 'Orders fetched successfully',
-      data: orders
+      data: orders,
+      pagination: { page, limit }
     });
   } catch (err) {
       next(err);

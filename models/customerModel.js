@@ -12,7 +12,7 @@ async function createCustomer(data) {
     name:data.name,
     email:data.email.toLowerCase(),
     phone:data.phone,
-    adress:data.address,
+    address:data.address,
     password:data.password,
     role:'customer',
     createdAt: new Date(),
@@ -24,7 +24,8 @@ async function createCustomer(data) {
 
 async function findCustomerById(customerId) {
   const db=getDB();
-  return db.collection(COLLECTION).findOne({_id: new ObjectId(customerId) },{ projection: { password: 0 } });
+  return db.collection(COLLECTION).findOne({_id: new ObjectId(customerId) },{
+     projection: { password: 0 } });
 }
 
 async function findCustomerByEmail(email) {
@@ -32,14 +33,14 @@ async function findCustomerByEmail(email) {
 return db.collection(COLLECTION).findOne({email:email.toLowerCase() });
 }
 
-async function listCustomers(page,limit) {
+async function listCustomers(filter, sort, { skip, limit }) {
   const db = getDB();
-  const skip = (page - 1) * limit;
-  return db.collection(COLLECTION)
-    .find({}, { projection: { password: 0 } })
-    .sort({ createdAt: -1 })
+  return db.collection('customers')
+    .find(filter)
+    .sort(sort)
     .skip(skip)
     .limit(limit)
+    .project({ password: 0 })  
     .toArray();
 }
 
@@ -48,7 +49,7 @@ async function updateCustomer(customerId, data) {
   const updateData = {
     name: data.name,
     phone: data.phone,
-    adress:data.address,
+    address:data.address,
     updatedAt: new Date()
   };
   await db.collection(COLLECTION).updateOne({ _id:new ObjectId(customerId) }, { $set: updateData });

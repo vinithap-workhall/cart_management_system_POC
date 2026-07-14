@@ -11,8 +11,7 @@ async function logCouponUsage(couponCode, cartId, discountAmount) {
 
   await db.collection(COLLECTION).updateOne(
     {cartId},
-    {
-      $set: {
+    {$set: {
         couponCode,
         discountAmount,
         updatedAt: new Date()

@@ -1,4 +1,14 @@
 import * as productModel from '../models/productModel.js';
+import { buildFilter, buildSort, buildPagination } from '../utils/built.js';
+
+const PRODUCT_FILTER_SCHEMA = {
+  name: { field: 'name', type: 'regex' },        
+  minPrice: { field: 'price', type: 'gte' },       
+  maxPrice: { field: 'price', type: 'lte' },      
+  inStock: { field: 'stock', type: 'gt', value: 0 },
+};
+
+const PRODUCT_SORTABLE_FIELDS = [ 'price', 'stock', 'name'];
 
 export const createProduct = async (req,res,next) => {
   try {
@@ -36,13 +46,15 @@ export const getProduct = async (req,res,next) => {
 
 export const listProducts = async (req,res,next) => {
   try {
-    const page = Number(req.query.page) > 0 ? Number(req.query.page) : 1;
-    const limit = Number(req.query.limit) > 0 ? Number(req.query.limit) : 10;
-    const products = await productModel.listProducts(page,limit);
+    const filter = buildFilter(req.query, PRODUCT_FILTER_SCHEMA);
+    const sort = buildSort(req.query, PRODUCT_SORTABLE_FIELDS);
+    const {page, limit, skip } = buildPagination(req.query);
+    const products = await productModel.listProducts(filter, sort, { skip, limit });
     return res.status(200).json({
       success: true,
       message: 'Products fetched successfully',
-      data: products
+      data: products,
+      pagination: {page, limit }
     });
   } catch (err) {
      next(err);
