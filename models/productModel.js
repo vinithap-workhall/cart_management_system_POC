@@ -21,10 +21,8 @@ async function findProductById(productId) {
 
 async function listProducts(filter, sort, { skip, limit }) {
   const db = getDB();
-  return db.collection('products')
-    .find(filter)
-    .sort(sort)
-    .skip(skip)
+  return db.collection('products').find(filter)
+    .sort(sort).skip(skip)
     .limit(limit)
     .toArray();
 }

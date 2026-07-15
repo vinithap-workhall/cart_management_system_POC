@@ -8,7 +8,7 @@ import { buildFilter, buildSort, buildPagination } from '../utils/built.js';
 const ORDER_FILTER_SCHEMA = {
   minTotal: { field: 'totalAmount', type: 'gte' },
   maxTotal: { field: 'totalAmount', type: 'lte' },
-  couponCode: { field: 'couponCode', type: 'exact' },
+  couponCode: { field: 'couponCode', type: 'in' },
   startDate: { field: 'createdAt', type: 'dateGte' },
   endDate: { field: 'createdAt', type: 'dateLte' },
 };

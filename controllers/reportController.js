@@ -2,7 +2,7 @@ import * as  cartModel from '../models/cartModel.js';
 import {getDB} from '../config/db.js';
 import { buildFilter, buildPagination } from '../utils/built.js';
 const DATE_RANGE_SCHEMA = {
-  startDate: { field: 'createdAt', type: 'dateGte' },
+  startDate:{ field: 'createdAt', type: 'dateGte' },
   endDate: { field: 'createdAt', type: 'dateLte' },
 };
 export const cartSummary = async (req,res,next) => {

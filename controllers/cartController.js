@@ -1,22 +1,18 @@
 import * as cartModel from'../models/cartModel.js';
-import * as  productModel from '../models/productModel.js';
 import * as  customerModel from'../models/customerModel.js';
+import { findProductById } from '../models/productModel.js';
 import  {logProductActivity} from '../models/productActivityLogModel.js';
-import {getDB } from "../config/db.js";
 import { buildFilter, buildSort, buildPagination } from '../utils/built.js';
 const CART_FILTER_SCHEMA = {
-  status: { field: 'status', type: 'exact' },       
-  minTotal: { field: 'total', type: 'gte' },         
-  maxTotal: { field: 'total', type: 'lte' },         
-  couponCode: { field: 'couponCode', type: 'exact' },
+  status:{field:'status', type: 'exact' },       
+  minTotal:{field: 'total', type: 'gte' },         
+  maxTotal:{ field: 'total', type: 'lte' },         
+  couponCode: {field: 'couponCode', type:'in' },
 };
 const CART_SORTABLE_FIELDS = ['createdAt','updatedAt','total','status'];
-
-
 function canAccessCart(cart, user) {
   return cart.customerId === user.customerId && user.role !== 'admin';
 }
-
 export const createCart = async (req,res,next) => {
   try {
     const{role}= req.user;
@@ -48,11 +44,13 @@ export const getCart = async (req,res,next) => {
     if (!canAccessCart(cart, req.user)) {
       return res.status(403).json({ success: false, message: 'You do not have access to this cart' });
     }
-    await cartModel.refreshPrice(cart);
+   const {cart:updatedCart, priceChanges} =await cartModel.refreshPrice(cart);
     return res.status(200).json({
       success: true,
       message: 'Cart fetched successfully',
-      data: cart
+      data: {
+        cart:updatedCart,priceChanges
+      }
     });
   } catch (err) {
      next(err);
@@ -72,51 +70,54 @@ export const  getCustomerCarts = async (req,res,next) => {
   const filter = buildFilter(req.query,CART_FILTER_SCHEMA);
     filter.customerId = req.params.customerId; 
     const sort = buildSort(req.query, CART_SORTABLE_FIELDS);
-    const { page, limit, skip } = buildPagination(req.query);
-
-    const carts = await cartModel.findCartsByCustomerId(filter, sort, { skip, limit });
-    for (const cart of carts) {
-      await cartModel.refreshPrice(cart);
-    }
+    const {page,limit,skip} = buildPagination(req.query);
+    const carts = await cartModel.findCartsByCustomerId(filter,sort,{skip,limit});
     return res.status(200).json({
       success: true,
       message: 'Carts fetched successfully',
       data: carts,
-      pagination: {page, limit}
+      pagination:{page, limit}
     });
   } catch (err) {
       next(err);
   }
 };
 
-export const addItem = async (req,res,next) => {
+export const addItem = async (req, res, next) => {
   try {
     const {cartId} = req.params;
-    const {productId,quantity} = req.body;
-
+    const {productId, quantity} = req.body;
     const cart = await cartModel.findCartById(cartId);
     if (!cart) {
-      return res.status(404).json({ success: false, message: 'Cart not found' });
+      return res.status(404).json({
+        success: false,message: "Cart not found"
+      });
     }
     if (!canAccessCart(cart, req.user)) {
-      return res.status(403).json({ success: false, message: 'You do not have access to this cart' });
+      return res.status(403).json({
+        success: false,
+        message: "You do not have access to this cart"
+      });
     }
-    if (cart.status !== 'ACTIVE') {
-      return res.status(400).json({ success: false, message: 'Cannot modify a checked-out cart' });
+    if (cart.status !== "ACTIVE") {
+      return res.status(400).json({
+        success: false,
+        message: "Cannot modify a checked-out cart"
+      });
     }
-
-    const product = await productModel.findProductById(productId);
+    const product = await findProductById(productId);
     if (!product) {
-      return res.status(404).json({success: false, message: 'Product not found' });
+      return res.status(404).json({
+        success: false,
+        message: "Product not found"
+      });
     }
-
-    const existingItem =cart.items.find((item) => item.productId === productId);
-    const requestedTotalQty = existingItem ? existingItem.quantity + quantity : quantity;
-    
+    const existingItem = cart.items.find(item => item.productId === productId);
+    const requestedTotalQty = existingItem? existingItem.quantity + quantity: quantity;
     if (!existingItem && cart.items.length >= 50) {
       return res.status(400).json({
         success: false,
-        message: 'A cart can contain a maximum of 50 different products.'
+        message: "A cart can contain a maximum of 50 different products."
       });
     }
     if (requestedTotalQty > product.stock) {
@@ -126,24 +127,22 @@ export const addItem = async (req,res,next) => {
       });
     }
     let statusCode;
-
     if (existingItem) {
-      existingItem.quantity = requestedTotalQty;
-      existingItem.totalPrice = existingItem.quantity * existingItem.unitPrice;
-      statusCode = 200;
+     await cartModel.updateExistingItem(cartId,productId,requestedTotalQty,product.price);
+     statusCode = 200;
     } else {
-      cart.items.push(cartModel.buildCartItem(product, quantity));
+      await cartModel.addNewItem(cartId,product,quantity);
       statusCode = 201;
     }
-    await cartModel.recalcAndSave(cart);
-    await logProductActivity(cart.customerId,productId, 'ADD', quantity);
-    return res.status(statusCode).json({
+   await logProductActivity(cart.customerId,productId,"ADD",quantity);
+   const updatedCart = await cartModel.recalculateTotals(cartId);
+   return res.status(statusCode).json({
       success: true,
-      message: statusCode === 201 ? 'Item added to cart' : 'Item quantity updated',
-      data: cart
+      message:statusCode === 201? "Item added to cart": "Item quantity updated",
+      data: updatedCart
     });
   } catch (err) {
-     next(err);
+    next(err);
   }
 };
 
@@ -171,7 +170,7 @@ export const updateItemQuantity = async (req,res,next) => {
       return res.status(400).json({sucess:false,message:'Cannot modify quantity of different item'})
     }
 
-    const product = await productModel.findProductById(productId);
+    const product = await findProductById(productId);
     if (!product) {
       return res.status(404).json({success: false, message: 'Product not found' });
     }
@@ -187,16 +186,13 @@ export const updateItemQuantity = async (req,res,next) => {
     if(quantity > item.quantity){
       await logProductActivity(cart.customerId,item.productId,'ADD', quantity - item.quantity);
     }
-    item.quantity = quantity;
-    item.unitPrice= product.price;
-    item.totalPrice = item.unitPrice * quantity;
     
-    await cartModel.recalcAndSave(cart);
-
+    await cartModel.updateExistingItem(cartId,product.productId,quantity,product.price);
+    const updatedCart = await cartModel.recalculateTotals(cartId);
     return res.status(200).json({
       success: true,
       message: 'Item quantity updated',
-      data:cart 
+      data:updatedCart 
     });
   } catch (err) {
     next(err);
@@ -233,19 +229,13 @@ export const removeItem = async (req, res, next) => {
         message: "Item not found in cart",
       });
     }
-    await cartModel.deleteItem(cartId,itemId)
-    const updatedCart = await cartModel.findCartById(cartId);
-    if (updatedCart.items.length === 0) {
-      updatedCart.couponCode = null;
-      updatedCart.discountPercentage = 0;
-    }
-    await cartModel.recalcAndSave(updatedCart);
+    await cartModel.deleteItem(cartId, itemId);
+    const updatedCart =await cartModel.recalculateTotals(cartId);
     await logProductActivity(cart.customerId,item.productId,"REMOVE",item.quantity);
-
     return res.status(200).json({
       success: true,
-      message: "Item removed from cart",
-      data: updatedCart,
+      message:"Item removed from cart",
+      data:updatedCart,
     });
 
   } catch (err) {
