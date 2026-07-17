@@ -84,9 +84,8 @@ export const applyCoupon = async (req, res, next) => {
         .json({ success: false, message: "Coupon is not active" });
     }
 
-    cart.couponCode = coupon.couponCode;
-    cart.discountPercentage = coupon.discountPercentage;
-    const updatedCart = await cartModel.couponRecal(cart);
+  
+    const updatedCart = await cartModel.couponRecal(cart.cartId,coupon.couponCode,coupon.discountPercentage);
     await logCouponUsage(coupon.couponCode, cart.cartId, cart.discount);
     return res.status(200).json({
       success: true,
@@ -128,10 +127,8 @@ export const removeCoupon = async (req, res, next) => {
         .status(400)
         .json({ success: false, message: "Cannot modify a checked-out cart" });
     }
-    await logCouponUsage(cart.couponCode, cart.cartId, 0);
-    cart.couponCode = null;
-    cart.discountPercentage = 0;
-    const updatedCart = await cartModel.couponRecal(cart);
+    await logCouponUsage(null, cart.cartId, 0);
+    const updatedCart = await cartModel.couponRecal(cart.cartId,null,0);
 
     return res.status(200).json({
       success: true,

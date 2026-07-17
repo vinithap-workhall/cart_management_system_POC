@@ -39,7 +39,7 @@ export const createCart = async (req, res, next) => {
   }
 };
 
-export const getCart = async (req, res, next) => {
+export const getCart = async(req, res, next) => {
   try {
     const cart = await cartModel.findCartById(req.params.cartId);
     if (!cart) {
@@ -55,8 +55,7 @@ export const getCart = async (req, res, next) => {
           message: "You do not have access to this cart",
         });
     }
-    const { cart: updatedCart, priceChanges } =
-      await cartModel.refreshPrice(cart);
+    const { cart: updatedCart, priceChanges } =await cartModel.refreshPrice(cart);
     return res.status(200).json({
       success: true,
       message: "Cart fetched successfully",
@@ -93,10 +92,10 @@ export const getCustomerCarts = async (req, res, next) => {
     filter.customerId = req.params.customerId;
     const sort = buildSort(req.query, CART_SORTABLE_FIELDS);
     const { page, limit, skip } = buildPagination(req.query);
-    const carts = await cartModel.findCartsByCustomerId(filter, sort, {
+    const carts = await cartModel.findCartsByCustomerId(filter, sort, 
       skip,
       limit,
-    });
+    );
     return res.status(200).json({
       success: true,
       message: "Carts fetched successfully",
@@ -159,20 +158,11 @@ export const addItem = async (req, res, next) => {
     let statusCode;
     let updatedCart;
     if (existingItem) {
-      const oldTotal = existingItem.totalPrice;
-      const newTotal = product.price * requestedTotalQty;
-      const changeValue = newTotal - oldTotal;
-      updatedCart=await cartModel.updateExistingItem(
-        cart,
-        productId,
-        requestedTotalQty,
-        product.price,
-        changeValue
-      );
+      updatedCart = await cartModel.updateExistingItem(cart.cartId, productId, requestedTotalQty, product.price);
       statusCode = 200;
     } else {
-       updatedCart =await cartModel.addNewItem(cart, product, requestedTotalQty);
-      statusCode = 201;
+       updatedCart = await cartModel.addNewItem(cart.cartId, product, requestedTotalQty);
+       statusCode = 201;
     }
     await logProductActivity(cart.customerId, productId, "ADD", quantity);
     return res.status(statusCode).json({
@@ -254,17 +244,7 @@ export const updateItemQuantity = async (req, res, next) => {
         quantity - item.quantity,
       );
     }
-const oldTotal = item.totalPrice;
-const newTotal = product.price * quantity;
-const changeValue = newTotal - oldTotal;
-
-const updatedCart = await cartModel.updateExistingItem(
-  cart,
-  product.productId,
-  quantity,
-  product.price,
-  changeValue
-);
+   const updatedCart = await cartModel.updateExistingItem(cart.cartId, product.productId, quantity, product.price);
     return res.status(200).json({
       success: true,
       message: "Item quantity updated",
@@ -304,8 +284,7 @@ export const removeItem = async (req, res, next) => {
         message: "Item not found in cart",
       });
     }
-    const updatedCart=await cartModel.deleteItem(cart,itemId,item.totalPrice);
-    
+    const updatedCart = await cartModel.deleteItem(cart.cartId, itemId);
     await logProductActivity(
       cart.customerId,
       item.productId,

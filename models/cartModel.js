@@ -1,11 +1,8 @@
 import { ObjectId } from "mongodb";
 import { getDB } from "../config/db.js";
+
 const COLLECTION = "carts";
 const FIXED_TAX = 0.05;
-
-function round(num) {
-  return Math.round(num * 100) / 100;
-}
 
 function buildCartItem(product, quantity) {
   return {
@@ -17,6 +14,69 @@ function buildCartItem(product, quantity) {
   };
 }
 
+function subtotalStage() {
+  return { $set: { subtotal: { $round: [{ $sum: "$items.totalPrice" }, 2] } } };
+}
+function discountTaxTotalStages() {
+  return [
+    {
+      $set: {
+        discount: {
+          $round: [
+            {
+              $cond: [
+                { $gt: ["$discountPercentage", 0] },
+                {
+                  $multiply: [
+                    "$subtotal",
+                    { $divide: ["$discountPercentage", 100] },
+                  ],
+                },
+                0,
+              ],
+            },
+            2,
+          ],
+        },
+      },
+    },
+    {
+      $set: {
+        tax: {
+          $round: [
+            {
+              $cond: [
+                {
+                  $gt: [{ $subtract: ["$subtotal", "$discount"] }, 0],
+                },
+                {
+                  $multiply: [
+                    { $subtract: ["$subtotal", "$discount"] },
+                    FIXED_TAX,
+                  ],
+                },
+                0,
+              ],
+            },
+            2,
+          ],
+        },
+      },
+    },
+    {
+      $set: {
+        total: {
+          $round: [
+            { $add: [{ $subtract: ["$subtotal", "$discount"] }, "$tax"] },
+            2,
+          ],
+        },
+      },
+    },
+    { $set: { updatedAt: "$$NOW" } },
+  ];
+}
+
 async function createCart(customerId) {
   const db = getDB();
   const newId = new ObjectId();
@@ -24,7 +84,7 @@ async function createCart(customerId) {
   const cart = {
     _id: newId,
     cartId: newId.toString(),
-    customerId: customerId,
+    customerId,
     items: [],
     couponCode: null,
     discountPercentage: 0,
@@ -43,10 +103,10 @@ async function createCart(customerId) {
 
 async function findCartById(cartId) {
   const db = getDB();
-  return db.collection(COLLECTION).findOne({ _id: new ObjectId(cartId) });
+  return db.collection(COLLECTION).findOne({ cartId });
 }
 
-async function findCartsByCustomerId(filter, sort, { skip, limit }) {
+async function findCartsByCustomerId(filter, sort,  skip, limit ) {
   const db = getDB();
   return db
     .collection(COLLECTION)
@@ -56,81 +116,101 @@ async function findCartsByCustomerId(filter, sort, { skip, limit }) {
     .limit(limit)
     .toArray();
 }
-async function deleteItem(cart, itemId,removeValue) {
-  const db =getDB();
-  cart.subtotal =round(cart.subtotal -removeValue);
-  if(cart.subtotal<=0){
-     cart.discountPercentage=0;
-     cart.couponCode=null;
-  }
-  const totals= calculateCartTotals(cart);
-  await db.collection(COLLECTION).updateOne(
-    { _id:cart._id },
+
+async function addNewItem(cartId, product, quantity) {
+  const db = getDB();
+  const newItem = buildCartItem(product, quantity);
+
+  await db
+    .collection(COLLECTION)
+    .updateOne({ cartId }, [
+      { $set: { items: { $concatArrays: ["$items", [newItem]] } } },
+      subtotalStage(),
+      ...discountTaxTotalStages(),
+    ]);
+  return findCartById(cartId);
+}
+
+async function updateExistingItem(cartId, productId, quantity, price) {
+  const db = getDB();
+  await db.collection(COLLECTION).updateOne({ cartId }, [
     {
-      $pull: {
+      $set: {
         items: {
-          itemId: itemId,
+          $map: {
+            input: "$items",
+            as: "item",
+            in: {
+              $cond: [
+                { $eq: ["$$item.productId", productId] },
+                {
+                  $mergeObjects: [
+                    "$$item",
+                    {
+                      quantity,
+                      unitPrice: price,
+                      totalPrice: { $multiply: [price, quantity] },
+                    },
+                  ],
+                },
+                "$$item",
+              ],
+            },
+          },
         },
       },
-      $set: {
-        ...totals,
-        discountPercentage:cart.discountPercentage,
-        couponCode:cart.couponCode,
-        updatedAt: new Date(),
-      },
     },
-  );
-  return await findCartById(cart.cartId);
-}
-async function updateExistingItem(cart, productId, quantity, price, changeValue) {
-  const db = getDB();
-  cart.subtotal = round(cart.subtotal + changeValue);
-  const totals=calculateCartTotals(cart);
-  await db.collection(COLLECTION).updateOne(
-    { cartId:cart.cartId,
-      "items.productId": productId,
-    },
-    {
-      $set: {
-        "items.$.quantity": quantity,
-        "items.$.unitPrice": price,
-        "items.$.totalPrice": price * quantity,
-         ...totals,
-        updatedAt: new Date(),
-      },
-    }
-  );
+    subtotalStage(),
+    ...discountTaxTotalStages(),
+  ]);
 
-  return await findCartById(cart.cartId);
+  return findCartById(cartId);
 }
 
-async function addNewItem(cart,product,quantity) {
+async function deleteItem(cartId, itemId) {
   const db = getDB();
-  cart.subtotal = round(cart.subtotal + (product.price * quantity));
-  const totals = calculateCartTotals(cart);
-
-  await db.collection(COLLECTION).updateOne(
-    { cartId: cart.cartId },
+  await db.collection(COLLECTION).updateOne({ cartId }, [
     {
-      $push: {
-        items: buildCartItem(product, quantity),
-      },
       $set: {
-        ...totals,
-        updatedAt: new Date(),
+        items: {
+          $filter: {
+            input: "$items",
+            as: "item",
+            cond: { $ne: ["$$item.itemId", itemId] },
+          },
+        },
       },
-    }
-  );
+    },
+    subtotalStage(),
+    {
+      $set: {
+        couponCode: {
+          $cond: [{ $lte: ["$subtotal", 0] }, null, "$couponCode"],
+        },
+        discountPercentage: {
+          $cond: [{ $lte: ["$subtotal", 0] }, 0, "$discountPercentage"],
+        },
+      },
+    },
+    ...discountTaxTotalStages(),
+  ]);
 
-  return await findCartById(cart.cartId);
+  return findCartById(cartId);
+}
+
+async function recalculateTotals(cartId) {
+  const db = getDB();
+
+  await db
+    .collection(COLLECTION)
+    .updateOne({ cartId }, [subtotalStage(), ...discountTaxTotalStages()]);
+
+  return findCartById(cartId);
 }
 
 async function refreshPrice(cart) {
   if (cart.status === "CHECKED_OUT") {
-    return {
-      cart,
-      priceChanges: [],
-    };
+    return { cart, priceChanges: [] };
   }
   const db = getDB();
   const productIds = cart.items.map((item) => item.productId);
@@ -147,9 +227,7 @@ async function refreshPrice(cart) {
 
   for (const item of cart.items) {
     const product = productMap.get(item.productId);
-    if (!product) {
-      continue;
-    }
+    if (!product) continue;
     if (item.unitPrice !== product.price) {
       priceChanges.push({
         productName: product.name,
@@ -161,71 +239,32 @@ async function refreshPrice(cart) {
       changed = true;
     }
   }
+
   if (changed) {
-    await db.collection(COLLECTION).updateOne(
-      { cartId: cart.cartId },
-      {
-        $set: {
-          items: cart.items,
-          updatedAt: new Date(),
-        },
-      },
-    );
+    await db
+      .collection(COLLECTION)
+      .updateOne(
+        { cartId: cart.cartId },
+        { $set: { items: cart.items, updatedAt: new Date() } },
+      );
     cart = await recalculateTotals(cart.cartId);
   }
-  return {
-    cart,
-    priceChanges,
-  };
+  return { cart, priceChanges };
 }
 
-async function recalculateTotals(cartId) {
+async function couponRecal(cartId, couponCode, discountPercentage) {
   const db = getDB();
-  const cart = await findCartById(cartId);
-   cart.subtotal = cart.items.reduce((sum, item) => sum + item.totalPrice, 0);
-  const totals = calculateCartTotals(cart);  
-  await db.collection(COLLECTION).updateOne(
-    { cartId },
-    {
-      $set: {
-        ...totals,
-        updatedAt: new Date(),
-      },
-    },
-  );
-  return await findCartById(cartId);
-}
-function calculateCartTotals(cart) {
-  let discount = 0;
-  if (cart.discountPercentage > 0) {
-    discount = (cart.subtotal * cart.discountPercentage) / 100;
-  }
-  const taxableAmount = cart.subtotal - discount;
-  const tax = taxableAmount > 0 ? taxableAmount * FIXED_TAX : 0;
-  const total = taxableAmount + tax;
-  return {
-    subtotal: round(cart.subtotal),
-    discount: round(discount),
-    tax: round(tax),
-    total: round(total),
-  };
+  await db
+    .collection(COLLECTION)
+    .updateOne({ cartId }, [
+      { $set: { couponCode, discountPercentage } },
+      subtotalStage(),
+      ...discountTaxTotalStages(),
+    ]);
+
+  return findCartById(cartId);
 }
 
-async function couponRecal(cart) {
-  const db = getDB();
-  const totals= calculateCartTotals(cart);
-  await db.collection(COLLECTION).updateOne(
-    { cartId: cart.cartId },
-    {$set: {
-        couponCode: cart.couponCode,
-        discountPercentage: cart.discountPercentage,
-        ...totals,
-        updatedAt: new Date(),
-      },
-    },
-  );
-  return await findCartById(cart.cartId);
-}
 export {
   recalculateTotals,
   addNewItem,
@@ -236,6 +275,5 @@ export {
   couponRecal,
   deleteItem,
   refreshPrice,
-  calculateCartTotals,
   buildCartItem,
 };
